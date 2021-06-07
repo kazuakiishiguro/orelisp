@@ -27,18 +27,34 @@ void add_history(char * unused) {}
 #define LASSERT(args, cond, err) \
     if (!(cond)) { lval_del(args); return lval_err(err); }
 
+/* forward declarations */
+struct lval;
+struct lenv;
+typedef struct lval lval;
+typedef struct lenv lenv;
+
+/* for lval types */
+enum {
+    LVAL_NUM,   // number
+    LVAL_ERR,   // error
+    LVAL_SYM,   // symbol
+    LVAL_FUN,   // function
+    LVAL_SEXPR, // s-expression
+    LVAL_QEXPR  // q-expression
+};
+
+typedef lval *(*lbuiltin)(lenv *, lval *);
+
 /* declare lval(lisp value) struct */
 typedef struct lval{
     int type;
     long num;
     char *err;
     char *sym;
+    lbuiltin fun;
     int count;
     struct lval **cell;
 } lval;
-
-/* for lval types */
-enum { LVAL_NUM, LVAL_ERR, LVAL_SYM, LVAL_SEXPR, LVAL_QEXPR };
 
 lval *lval_err(char *m) {
     lval *v = malloc(sizeof(lval));
@@ -63,6 +79,13 @@ lval *lval_sym(char *s) {
     return v;
 }
 
+lval *lval_fun(lbuiltin func) {
+    lval *v = malloc(sizeof(lval));
+    v->type = LVAL_FUN;
+    v->fun = func;
+    return v;
+}
+
 lval *lval_sexpr(void) {
     lval *v = malloc(sizeof(lval));
     v->type = LVAL_SEXPR;
@@ -81,7 +104,8 @@ lval *lval_qexpr(void) {
 
 void lval_del(lval *v) {
     switch(v->type) {
-        case LVAL_NUM: break;
+        case LVAL_NUM:
+        case LVAL_FUN: break;
         case LVAL_ERR: free(v->err); break;
         case LVAL_SYM: free(v->sym); break;
 
@@ -151,6 +175,7 @@ void lval_print(lval *v) {
         case LVAL_NUM: printf("%li", v->num); break;
         case LVAL_ERR: printf("err: %s", v->err); break;
         case LVAL_SYM: printf("%s", v->sym); break;
+        case LVAL_FUN: printf("<function>"); break;
         case LVAL_SEXPR: lval_expr_print(v, '(', ')');  break;
         case LVAL_QEXPR: lval_expr_print(v, '{', '}');  break;
     }
@@ -158,6 +183,32 @@ void lval_print(lval *v) {
 
 void lval_println(lval *v) {
     lval_print(v); putchar('\n');
+}
+
+lval *lval_copy(lval *v) {
+    lval *x = malloc(sizeof(lval));
+    x->type = v->type;
+
+    switch (v->type) {
+        case LVAL_FUN: x->fun = v->fun; break;
+        case LVAL_NUM: x->num = v->num; break;
+        case LVAL_ERR:
+            x->err = malloc(strlen(v->err) + 1);
+            strcpy(x->err, v->err); break;
+        case LVAL_SYM:
+            x->sym = malloc(strlen(v->sym) + 1);
+            strcpy(x->sym, v->sym); break;
+
+        case LVAL_SEXPR:
+        case LVAL_QEXPR:
+            x->count = v->count;
+            x->cell = malloc(sizeof(lval *) * x->count);
+            for (int i = 0; i < x->count; i++) {
+                x->cell[i] = lval_copy(v->cell[i]);
+            }
+            break;
+    }
+    return x;
 }
 
 lval *lval_eval_sexpr(lval *v);
@@ -191,6 +242,61 @@ lval *lval_join(lval *x, lval *y) {
     }
 
     return x;
+}
+
+/*
+ * lenv
+ */
+struct lenv {
+    int count;
+    char **syms;
+    lval **vals;
+};
+
+lenv *lenv_new(void) {
+    lenv *e = malloc(sizeof(lenv));
+    e->count = 0;
+    e->syms = NULL;
+    e->vals = NULL;
+    return e;
+}
+
+void lenv_del(lenv *e) {
+    for (int i = 0; i < e->count; i++) {
+        free(e->syms[i]);
+        lval_del(e->vals[i]);
+    }
+    free(e->syms);
+    free(e->vals);
+    free(e);
+}
+
+lval *lenv_get(lenv *e, lval *v) {
+    for (int i = 0; i < e->count; i++) {
+        if (strcmp(e->syms[i], v->sym) == 0) {
+            return lval_copy(e->vals[i]);
+        }
+    }
+
+    return lval_err("unbound symbol");
+}
+
+void lenv_put(lenv *e, lval *k, lval *v) {
+    for (int i = 0; i < e->count; i++) {
+        if(strcmp(e->syms[i], k->sym) == 0) {
+            lval_del(e->vals[i]);
+            e->vals[i] = lval_copy(v);
+            return;
+        }
+    }
+
+    e->count++;
+    e->vals = realloc(e->vals, sizeof(lval *) * e->count);
+    e->syms = realloc(e->syms, sizeof(char *) * e->count);
+
+    e->vals[e->count-1] = lval_copy(v);
+    e->syms[e->count-1] = malloc(strlen(k->sym)+1);
+    strcpy(e->syms[e->count-1], k->sym);
 }
 
 lval *builtin_op(lval *v, char *op) {
@@ -339,8 +445,7 @@ int main(int argc, char **argv) {
     mpca_lang(MPCA_LANG_DEFAULT,
     "                                                           \
         number : /-?[0-9]+/ ;                                   \
-        symbol : \"list\" | \"head\" | \"tail\"                 \
-               | \"join\" | \"eval\" | '+' | '-' | '*' | '/' ;  \
+        symbol : /[a-zA-Z0-9_+\\-*\\/\\\\=<>!&]+/ ;             \
         sexpr  : '(' <expr>* ')' ;                              \
         qexpr  : '{' <expr>* '}' ;                              \
         expr   : <number> | <symbol> | <sexpr> | <qexpr>;       \
