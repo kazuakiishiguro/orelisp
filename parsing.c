@@ -125,7 +125,8 @@ lval *lval_read(mpc_ast_t *t) {
         if (strcmp(t->children[i]->contents, "(") == 0) { continue; }
         if (strcmp(t->children[i]->contents, ")") == 0) { continue; }
         if (strcmp(t->children[i]->contents, "{") == 0) { continue; }
-        if (strcmp(t->children[i]->contents, "}") == 0) { continue; }           if (strcmp(t->children[i]->tag, "regex") == 0) { continue; }
+        if (strcmp(t->children[i]->contents, "}") == 0) { continue; }
+        if (strcmp(t->children[i]->tag, "regex") == 0) { continue; }
         x = lval_add(x, lval_read(t->children[i]));
     }
 
@@ -151,7 +152,8 @@ void lval_print(lval *v) {
         case LVAL_ERR: printf("err: %s", v->err); break;
         case LVAL_SYM: printf("%s", v->sym); break;
         case LVAL_SEXPR: lval_expr_print(v, '(', ')');  break;
-        case LVAL_QEXPR: lval_expr_print(v, '{', '}');  break;              }
+        case LVAL_QEXPR: lval_expr_print(v, '{', '}');  break;
+    }
 }
 
 void lval_println(lval *v) {
@@ -335,7 +337,7 @@ int main(int argc, char **argv) {
 
     /* Define them with the following Language */
     mpca_lang(MPCA_LANG_DEFAULT,
-     "                                                          \
+    "                                                           \
         number : /-?[0-9]+/ ;                                   \
         symbol : \"list\" | \"head\" | \"tail\"                 \
                | \"join\" | \"eval\" | '+' | '-' | '*' | '/' ;  \
