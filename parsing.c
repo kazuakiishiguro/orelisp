@@ -419,16 +419,26 @@ lval *builtin_join(lenv *e, lval *v) {
     return x;
 }
 
-/* lval *builtin(lval *v, char *func) { */
-/*     if (strcmp("list", func) == 0) { return builtin_list(v); } */
-/*     if (strcmp("head", func) == 0) { return builtin_head(v); } */
-/*     if (strcmp("tail", func) == 0) { return builtin_tail(v); } */
-/*     if (strcmp("join", func) == 0) { return builtin_join(v); } */
-/*     if (strcmp("eval", func) == 0) { return builtin_eval(v); } */
-/*     if (strstr("+-/\*", func)) { return builtin_op(v, func); } */
-/*     lval_del(v); */
-/*     return lval_err("Unknown Function"); */
-/* } */
+lval *builtin_def(lenv *e, lval *v) {
+    LASSERT(v, v->cell[0]->type == LVAL_QEXPR,
+            "Function 'def passed incorrect type");
+    lval *syms = v->cell[0];
+    for (int i = 0; i < syms->count; i++) {
+        LASSERT(v, syms->cell[i]->type == LVAL_SYM,
+                "Function 'def' cannot define non-symbol");
+    }
+
+    LASSERT(v, syms->count == v->count-1,
+            "Function 'def' cannot define incorrect "
+            "number of values to symbols");
+
+    for (int i = 0; i < syms->count; i++) {
+        lenv_put(e, syms->cell[i], v->cell[i+1]);
+    }
+
+    lval_del(v);
+    return lval_sexpr();
+}
 
 void lenv_add_builtin(lenv *e, char *name, lbuiltin func) {
     lval *k = lval_sym(name);
@@ -439,6 +449,9 @@ void lenv_add_builtin(lenv *e, char *name, lbuiltin func) {
 }
 
 void lenv_add_builtins(lenv *e) {
+    /* variable functions */
+    lenv_add_builtin(e, "def", builtin_def);
+
     /* list functions */
     lenv_add_builtin(e, "list", builtin_list);
     lenv_add_builtin(e, "head", builtin_head);
