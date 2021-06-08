@@ -211,10 +211,17 @@ lval *lval_copy(lval *v) {
     return x;
 }
 
-lval *lval_eval_sexpr(lval *v);
+lval *lval_eval_sexpr(lenv *e, lval *v);
+lval *lenv_get(lenv *e, lval *v);
 
-lval *lval_eval(lval *v) {
-    if (v->type == LVAL_SEXPR) { return lval_eval_sexpr(v); }
+lval *lval_eval(lenv *e,lval *v) {
+    if (v->type == LVAL_SYM) {
+        lval *x = lenv_get(e, v);
+        lval_del(v);
+        return x;
+    }
+
+    if (v->type == LVAL_SEXPR) { return lval_eval_sexpr(e, v); }
     return v;
 }
 
@@ -299,7 +306,10 @@ void lenv_put(lenv *e, lval *k, lval *v) {
     strcpy(e->syms[e->count-1], k->sym);
 }
 
-lval *builtin_op(lval *v, char *op) {
+/*
+ * Builtins
+ */
+lval *builtin_op(lenv *e, lval *v, char *op) {
     /* make sure all arguments are numbers */
     for (int i = 0; i < v->count; i++) {
         if (v->cell[i]->type != LVAL_NUM) {
@@ -332,7 +342,23 @@ lval *builtin_op(lval *v, char *op) {
     return x;
 }
 
-lval *builtin_head(lval *v) {
+lval *builtin_add(lenv *e, lval *v) {
+    return builtin_op(e, v, "+");
+}
+
+lval *builtin_sub(lenv *e, lval *v) {
+    return builtin_op(e, v, "-");
+}
+
+lval *builtin_mul(lenv *e, lval *v) {
+    return builtin_op(e, v, "*");
+}
+
+lval *builtin_div(lenv *e, lval *v) {
+    return builtin_op(e, v, "/");
+}
+
+lval *builtin_head(lenv *e, lval *v) {
     LASSERT(v, v->count==1,
             "Function 'head' passed too many arguments");
     LASSERT(v, v->cell[0]->type == LVAL_QEXPR,
@@ -347,7 +373,7 @@ lval *builtin_head(lval *v) {
     return v_first;
 }
 
-lval *builtin_tail(lval *v) {
+lval *builtin_tail(lenv *e, lval *v) {
     LASSERT(v, v->count==1,
             "Function 'tail' passed too many arguments");
     LASSERT(v, v->cell[0]->type == LVAL_QEXPR,
@@ -360,12 +386,12 @@ lval *builtin_tail(lval *v) {
     return v_tail;
 }
 
-lval *builtin_list(lval *v) {
+lval *builtin_list(lenv *e, lval *v) {
     v->type = LVAL_QEXPR;
     return v;
 }
 
-lval *builtin_eval(lval *v) {
+lval *builtin_eval(lenv *e, lval *v) {
     LASSERT(v, v->count == 1,
             "Function 'eval' passed too many arguments");
     LASSERT(v, v->cell[0]->type == LVAL_QEXPR,
@@ -373,10 +399,10 @@ lval *builtin_eval(lval *v) {
 
     lval *v_eval = lval_take(v, 0);
     v_eval->type = LVAL_SEXPR;
-    return lval_eval(v_eval);
+    return lval_eval(e, v_eval);
 }
 
-lval *builtin_join(lval *v) {
+lval *builtin_join(lenv *e, lval *v) {
     for (int i = 0; i < v->count; i++) {
         LASSERT(v, v->cell[i]->type == LVAL_QEXPR,
                 "Function 'join' passed incorrect types");
@@ -393,21 +419,44 @@ lval *builtin_join(lval *v) {
     return x;
 }
 
-lval *builtin(lval *v, char *func) {
-    if (strcmp("list", func) == 0) { return builtin_list(v); }
-    if (strcmp("head", func) == 0) { return builtin_head(v); }
-    if (strcmp("tail", func) == 0) { return builtin_tail(v); }
-    if (strcmp("join", func) == 0) { return builtin_join(v); }
-    if (strcmp("eval", func) == 0) { return builtin_eval(v); }
-    if (strstr("+-/*", func)) { return builtin_op(v, func); }
+/* lval *builtin(lval *v, char *func) { */
+/*     if (strcmp("list", func) == 0) { return builtin_list(v); } */
+/*     if (strcmp("head", func) == 0) { return builtin_head(v); } */
+/*     if (strcmp("tail", func) == 0) { return builtin_tail(v); } */
+/*     if (strcmp("join", func) == 0) { return builtin_join(v); } */
+/*     if (strcmp("eval", func) == 0) { return builtin_eval(v); } */
+/*     if (strstr("+-/\*", func)) { return builtin_op(v, func); } */
+/*     lval_del(v); */
+/*     return lval_err("Unknown Function"); */
+/* } */
+
+void lenv_add_builtin(lenv *e, char *name, lbuiltin func) {
+    lval *k = lval_sym(name);
+    lval *v = lval_fun(func);
+    lenv_put(e, k, v);
+    lval_del(k);
     lval_del(v);
-    return lval_err("Unknown Function");
 }
 
-lval *lval_eval_sexpr(lval *v) {
+void lenv_add_builtins(lenv *e) {
+    /* list functions */
+    lenv_add_builtin(e, "list", builtin_list);
+    lenv_add_builtin(e, "head", builtin_head);
+    lenv_add_builtin(e, "tail", builtin_tail);
+    lenv_add_builtin(e, "eval", builtin_eval);
+    lenv_add_builtin(e, "join", builtin_join);
+
+    /* mathmatical functions */
+    lenv_add_builtin(e, "+", builtin_add);
+    lenv_add_builtin(e, "-", builtin_sub);
+    lenv_add_builtin(e, "*", builtin_mul);
+    lenv_add_builtin(e, "/", builtin_div);
+}
+
+lval *lval_eval_sexpr(lenv *e, lval *v) {
     /* evaluate children */
     for (int i = 0; i < v->count; i++) {
-        v->cell[i] = lval_eval(v->cell[i]);
+        v->cell[i] = lval_eval(e, v->cell[i]);
     }
 
     /* error check and return the first error */
@@ -416,17 +465,18 @@ lval *lval_eval_sexpr(lval *v) {
     }
 
     if (v->count == 0) { return v; }
-
     if (v->count == 1) { return lval_take(v, 0); }
 
     /* make sure the first element is always symbol */
     lval* f = lval_pop(v, 0);
-    if (f->type != LVAL_SYM) {
-        lval_del(f); lval_del(v);
-        return lval_err("S-expression does not start with symbol!");
+    if (f->type != LVAL_FUN) {
+        lval_del(v);
+        lval_del(f);
+        return lval_err("first element is not a function");
     }
 
-    lval *result = builtin(v, f->sym);
+    /* if so, call function to get result */
+    lval *result = f->fun(e, v);
     lval_del(f);
 
     return result;
@@ -456,13 +506,16 @@ int main(int argc, char **argv) {
     puts("Orelisp version 0.0.2");
     puts("Press Ctl+c to Exit\n");
 
+    lenv *e = lenv_new();
+    lenv_add_builtins(e);
+
     while (1) {
         char *input = readline("orelisp> ");
         add_history(input);
 
         mpc_result_t r;
         if (mpc_parse("<stdin>", input, Orelisp, &r)) {
-            lval *x = lval_eval(lval_read(r.output));
+            lval *x = lval_eval(e, lval_read(r.output));
             lval_println(x);
             lval_del(x);
             mpc_ast_delete(r.output);
@@ -473,6 +526,8 @@ int main(int argc, char **argv) {
 
         free(input);
     }
+
+    lenv_del(e);
 
     /* undefine and delete our parser */
     mpc_cleanup(6, Number, Symbol, Sexpr, Qexpr, Expr, Orelisp);
