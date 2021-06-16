@@ -513,6 +513,7 @@ lval *lval_read(char *s, int *i) {
         (*i)++;
         x = lval_read_expr(s, i, ')');
     } else if (s[*i] == '{') { // q-expr
+        (*i)++;
         x = lval_read_expr(s, i, '}');
     } else if (strchr( // symbol
         "abcdefghijklmnopqrstuvwxyz"
@@ -522,7 +523,7 @@ lval *lval_read(char *s, int *i) {
     } else if (strchr("\"", s[*i])) { // string
         x = lval_read_str(s, i);
     } else { // error
-        x = lval_err("unexpedted character %c", s[*i]);
+        x = lval_err("unexpected character %c", s[*i]);
     }
 
     while (strchr(" \t\v\r\n;", s[*i]) && s[*i] != '\0') {
